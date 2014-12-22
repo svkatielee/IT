@@ -43,14 +43,17 @@ void pressed()  // User button oressed interupt
 void get_imu(void const *args)
 {
 	if(Debug_pt==1) imu.pc.printf("start get_imu ");
+	float q[4];
 	float ypr[3];
 	float values[9];
   while (1) {
 	
     imu.getValues(values);
-    if(Debug_pt==1) imu.pc.printf("ACC: %04.0f %04.0f %04.0f GYR: %04.0f %04.0f %04.0f MAG: %04.0f %04.0f %04.0f \n\r",values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8] );
+    if(Debug_pt==2) imu.pc.printf("ACC: %04.0f %04.0f %04.0f GYR: %04.0f %04.0f %04.0f MAG: %04.0f %04.0f %04.0f \n\r",values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8] );
     imu.getYawPitchRoll(ypr);
     if(Debug_pt==1) imu.pc.printf("YAW: %+5.2f PITCH: %+5.2f ROLL: %+5.2f \n",ypr[0],ypr[1],ypr[2]);
+    imu.getQ(q);
+    if(Debug_pt==3) imu.pc.printf("Q=%+5.3f %+5.3f %+5.3f %+5.3f\n", q[0], q[1], q[2], q[3]);
     rt_st = run_time.read_us();
     Thread::wait(30);
     run_time.reset();
