@@ -1,5 +1,4 @@
-#define NEW
-#ifdef NEW  //new main
+ 
 #include "mbed.h"
 #include "math.h"
 #include "rtos.h"
@@ -19,16 +18,25 @@ uint32_t rt_st=0;
 uint32_t rt_sp=0;
 IMU10DOF imu(PB_9, PB_8);
 byte s[4];
-int Debug_pt = 1; // 0=none, 1, 2= all
+int Debug_pt = 0;
+// autopilot
+float Qset[4];  // set point for desired attitude
+float Qerr[4];  // error values - diff fron  desired - actual
+float Qcur[4];  // current orientation
+int State=0; //  {INIT=0 ,STANBY=1, AUTO=2, DODGE=3};
+int lastState=0;
+
 
 int var2=0;
 AnalogIn pin3(PA_0);
   
 void pressed()  // User button oressed interupt
 {
-    Debug_pt++;
+    State++;
+    State = (State % 3);
+    //Debug_pt++;
     Debug_pt = (Debug_pt % 6);
-    imu.pc.printf("\nButton pressed rt_st=%d  debug_pt=%d \n", rt_st,Debug_pt);
+    imu.pc.printf("\nButton pressed rt_st=%d  debug_pt=%d  New state=%d \n", rt_st,Debug_pt, State);
 }
 
 
@@ -42,18 +50,19 @@ void pressed()  // User button oressed interupt
 
 void get_imu(void const *args)
 {
-	if(Debug_pt==1) imu.pc.printf("start get_imu ");
+	if(Debug_pt==4) imu.pc.printf("start get_imu ");
 	float q[4];
 	float ypr[3];
 	float values[9];
   while (1) {
 	
     imu.getValues(values);
-    if(Debug_pt==2) imu.pc.printf("ACC: %04.0f %04.0f %04.0f GYR: %04.0f %04.0f %04.0f MAG: %04.0f %04.0f %04.0f \n\r",values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8] );
+    if(Debug_pt==5) imu.pc.printf("ACC: %04.0f %04.0f %04.0f GYR: %04.0f %04.0f %04.0f MAG: %04.0f %04.0f %04.0f \n\r",values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8] );
     imu.getYawPitchRoll(ypr);
-    if(Debug_pt==1) imu.pc.printf("YAW: %+5.2f PITCH: %+5.2f ROLL: %+5.2f \n",ypr[0],ypr[1],ypr[2]);
+    if(Debug_pt==6) imu.pc.printf("YAW: %+5.2f PITCH: %+5.2f ROLL: %+5.2f \n",ypr[0],ypr[1],ypr[2]);
     imu.getQ(q);
-    if(Debug_pt==3) imu.pc.printf("Q=%+5.3f %+5.3f %+5.3f %+5.3f\n", q[0], q[1], q[2], q[3]);
+      for (int i=0;i<4;i++) Qcur[i]=q[i];
+      if(Debug_pt==3) imu.pc.printf("Q=%+5.3f %+5.3f %+5.3f %+5.3f\n", q[0], q[1], q[2], q[3]);
     rt_st = run_time.read_us();
     Thread::wait(30);
     run_time.reset();
@@ -69,7 +78,13 @@ void led2_thread(void const *args) {
       //  imu.pc.printf("led2_th wait=%x  \n",Thread::wait(1000));
     }
 }
- 
+
+
+void print_q(char * Name, float *q) // print a quaternion
+{
+	imu.pc.printf(" %s= %+5.3f %+5.3f %+5.3f %+5.3f ", Name, q[0], q[1], q[2], q[3]);
+}
+
 int main() {
 	
 	
@@ -92,81 +107,40 @@ wait(2);
     
     while (true) {
         led1 = !led1;
+        switch(State) {
+			case 0: // INIT:
+				imu.pc.printf("in INIT of case\n");
+				break;
+			case 1: // STANDBY:
+				imu.pc.printf("in STANBY of case\n");
+				break;
+			case 2: // AUTO:
+				if (lastState!=2) {
+					for (int i=0;i<4;i++) Qset[i]=Qcur[i];
+					lastState=2;
+				}
+				print_q("Qcur", Qcur); 
+				print_q("Qset", Qset);
+				imu.pc.printf("\n");
+				break;
+				
+			case 3: //DODGE:
+				imu.pc.printf("in DODGE of case\n");
+			default:
+			
+				imu.pc.printf("in default of case, state=%d\n", State);	
+		}
+        //print_q("Qcur",Qcur);
         
         Thread::wait(500);
 	//	get_imu();
 //		float ypr[3];
 //	float values[9];
-//    imu.getValues(values);
+//    imu.getValues(values);;
 //    imu.pc.printf("ACC: %04.0f %04.0f %04.0f GYR: %04.0f %04.0f %04.0f MAG: %04.0f %04.0f %04.0f \n\r",values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8] );
 //    imu.getYawPitchRoll(ypr);
 //    imu.pc.printf("YAW: %+5.2f PITCH: %+5.2f ROLL: %+5.2f \n",ypr[0],ypr[1],ypr[2]);
 		wait(0.01);
     }
 }
-#else // Old main
 
-#include "mbed.h"
-#include "math.h"
-
-
-//#include "HMC5883L.h"
-//#include "ADXL345_I2C.h"
-//#include "L3G4200D.h"
-//#include "BMP085.h"
-#include "IMU10DOF.h"
-
-//#include "PwmIn.h"
-
- /*
-PwmOut rled(LED_RED);
-PwmOut gled(LED_GREEN);
-PwmOut bled(LED_BLUE);
- */
-IMU10DOF imu(PB_9, PB_8);
-float ypr[3];
-float values[9];
-double head;
-int x[3];
-byte s[4];
-int main()
-{
- //   rled=1;
- //   gled=1;
-
-    imu.pc.printf("Ceci est un Test\r\n");
-    imu.init(true);
-    //imu.gyro.status(s);imu.pc.printf(" GYR: %04i %04i %04i %04i \n\r",s[0],s[1],s[2],s[3]);
-    //imu.gyro.init();
-   // wait(1);
-    imu.gyro.status(s);imu.pc.printf(" GYR2: %x %x %x %x \n\r",s[0],s[1],s[2],s[3]);
-    imu.pc.printf("Test passe\r\n");
-    float alt=0;
-
-    wait(3);
-    imu.pc.printf("\n\r");
-    
-    while(1) {
-        imu.getValues(values);
-        imu.getEuler(ypr);
-       // imu.gyro.readFin(ypr);  //imu.pc.printf(" GYR: %04i %04i %04i \n\r",x[0],x[1],x[2]);
-
-        imu.pc.printf("YAW: %+5.2f PITCH: %+5.2f ROLL: %+5.2f ",ypr[0],ypr[1],ypr[2]);
-        alt=imu.getBaroAlt();
-        imu.pc.printf("ALT : %03.0f ",alt);
-		head = imu.magn.getHeadingXY(); imu.pc.printf("HDG: %+4.1f ",(head * 180/M_PI));
-		//imu.magn.getXYZ
-       // imu.pc.printf("ACC: %04.0f %04.0f %04.0f GYR: %04.0f %04.0f %04.0f MAG: %04.0f %04.0f %04.0f \n\r",values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8] );
-        wait_ms(1);
-   //     bled=!bled;
-
-        imu.pc.printf("\n\r");
-
-    }
-
-
-
-
-
-}
-#endif
