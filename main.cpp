@@ -1,9 +1,14 @@
- 
+/**
+ * TCL Services
+ * Larry Littlefield  larryl@tclscom
+ * autopilot
+ */ 
 #include "mbed.h"
 #include "math.h"
 #include "rtos.h"
 #include "IMU10DOF.h"
-
+//#include "vector_math.h"
+#include "helper_3dmath.h"
 
 void pressed();
 
@@ -19,21 +24,26 @@ uint32_t rt_sp=0;
 IMU10DOF imu(PB_9, PB_8);
 byte s[4];
 int Debug_pt = 0;
+
 // autopilot
-float Qset[4];  // set point for desired attitude
-float Qerr[4];  // error values - diff fron  desired - actual
-float Qcur[4];  // current orientation
+Quaternion Qset;  // set point for desired attitude
+Quaternion Qerr;  // error values - diff fron  desired - actual
+Quaternion Qcur;  // current orientation
+
 int State=0; //  {INIT=0 ,STANBY=1, AUTO=2, DODGE=3};
 int lastState=0;
-
+float ypr_set[3], ypr_cur[3], ypr_err[3];
+float ypr[3];
+float values[11];  //0-2 acc, 3-5 gyro, 6-8 magn, 9-10 baro
 
 int var2=0;
 AnalogIn pin3(PA_0);
   
 void pressed()  // User button oressed interupt
 {
+    lastState=State;
     State++;
-    State = (State % 3);
+    State = (State % 5);
     //Debug_pt++;
     Debug_pt = (Debug_pt % 6);
     imu.pc.printf("\nButton pressed rt_st=%d  debug_pt=%d  New state=%d \n", rt_st,Debug_pt, State);
@@ -52,17 +62,19 @@ void get_imu(void const *args)
 {
 	if(Debug_pt==4) imu.pc.printf("start get_imu ");
 	float q[4];
-	float ypr[3];
-	float values[9];
-  while (1) {
 	
+  while (1) {	
     imu.getValues(values);
-    if(Debug_pt==5) imu.pc.printf("ACC: %04.0f %04.0f %04.0f GYR: %04.0f %04.0f %04.0f MAG: %04.0f %04.0f %04.0f \n\r",values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8] );
+		if(Debug_pt==5) imu.pc.printf("ACC: %04.0f %04.0f %04.0f GYR: %04.0f %04.0f %04.0f MAG: %04.0f %04.0f %04.0f \n\r",values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8] );
     imu.getYawPitchRoll(ypr);
-    if(Debug_pt==6) imu.pc.printf("YAW: %+5.2f PITCH: %+5.2f ROLL: %+5.2f \n",ypr[0],ypr[1],ypr[2]);
-    imu.getQ(q);
-      for (int i=0;i<4;i++) Qcur[i]=q[i];
-      if(Debug_pt==3) imu.pc.printf("Q=%+5.3f %+5.3f %+5.3f %+5.3f\n", q[0], q[1], q[2], q[3]);
+		if(Debug_pt==0 && State==0) imu.pc.printf("YAW: %+5.2f PITCH: %+5.2f ROLL: %+5.2f \n",ypr[0],ypr[1],ypr[2]);
+    imu.getQ(q); 
+		Qcur.w = q[0];Qcur.x = q[1]; Qcur.y = q[2]; Qcur.z = q[3];
+			 // Qcur(q[0],q[1],q[2],q[3]); //for (int i=0;i<4;i++) Qcur[i]=q[i];
+			if(Debug_pt==0 && State==4) {
+				imu.pc.printf("q=%+5.3f %+5.3f %+5.3f %+5.3f  ", q[0], q[1], q[2], q[3]);
+				imu.pc.printf("Qcur=%+5.3f %+5.3f %+5.3f %+5.3f\n", Qcur.w, Qcur.x, Qcur.y, Qcur.z);
+			}
     rt_st = run_time.read_us();
     Thread::wait(30);
     run_time.reset();
@@ -79,10 +91,23 @@ void led2_thread(void const *args) {
     }
 }
 
+float rawHeading()
+{	// heading = arctan(Y/X)
+	float heading = atan2f(values[7], values[6]); 
+	if(heading < 0.0) { heading += PI2; }
+    if(heading > PI2) { heading -= PI2; }
+    
+	return heading*180/M_PI;
+}
 
-void print_q(char * Name, float *q) // print a quaternion
+void print_v(float * v)
 {
-	imu.pc.printf(" %s= %+5.3f %+5.3f %+5.3f %+5.3f ", Name, q[0], q[1], q[2], q[3]);
+	imu.pc.printf("  = %+5.3f %+5.3f %+5.3f ", v[0], v[1], v[2]);
+}
+	
+void print_q(char * Name, Quaternion q) // print a quaternion
+{
+	imu.pc.printf(" %s= %+5.3f %+5.3f %+5.3f %+5.3f ", Name, q.w, q.x, q.y, q.z);
 }
 
 int main() {
@@ -107,32 +132,59 @@ wait(2);
     
     while (true) {
         led1 = !led1;
+        float hr, hc, hs, he;  // Tmp headingd
         switch(State) {
 			case 0: // INIT:
 				imu.pc.printf("in INIT of case\n");
 				break;
 			case 1: // STANDBY:
-				imu.pc.printf("in STANBY of case\n");
+				imu.pc.printf("STANBY: ");
+				imu.pc.printf("YAW: %+5.2f PITCH: %+5.2f ROLL: %+5.2f \n",ypr[0],ypr[1],ypr[2]);
 				break;
 			case 2: // AUTO:
 				if (lastState!=2) {
-					for (int i=0;i<4;i++) Qset[i]=Qcur[i];
-					lastState=2;
+					Qset=Qcur;
 				}
-				print_q("Qcur", Qcur); 
-				print_q("Qset", Qset);
+				//print_q("Qcur", Qcur); 
+				//print_q("Qset", Qset);
+				//imu.pc.printf("\n");
+				Qset.getYawPitchRoll(ypr_set);
+				Qcur.getYawPitchRoll(ypr_cur);
+				//print_v(ypr_set);
+				//print_v(ypr_cur);
+				hr = rawHeading();
+				hc=Qcur.getHeading();
+				hs=Qset.getHeading();
+				he=Qerr.getHeading();
+				imu.pc.printf("RawHead %+6.2f Cur.head %+6.2f Set.head %+6.2f Err.head %+6.2f ", hr, hc, hs, he);
 				imu.pc.printf("\n");
 				break;
-				
 			case 3: //DODGE:
-				imu.pc.printf("in DODGE of case\n");
+				if (lastState!=3) {
+					Qset=Qcur;
+					Qerr=Qcur;
+				}
+				Qcur.getEulerRad(ypr_cur);
+				Qset.getEulerRad(ypr_set);
+				Qerr.getEulerRad(ypr_err);
+				print_v(ypr_set);
+				print_v(ypr_cur);
+				print_v(ypr_err);
+				imu.pc.printf("\n");
+				break;
+			case 6: //test
+				for (int i=2;i<8;i++){
+					imu.pc.printf("inv sqrt of %d is %f\n", (i*i), invSqrt((float)(i*i)));
+				}
+				wait(3);
+				break;
 			default:
 			
 				imu.pc.printf("in default of case, state=%d\n", State);	
 		}
         //print_q("Qcur",Qcur);
         
-        Thread::wait(500);
+        Thread::wait(100);
 	//	get_imu();
 //		float ypr[3];
 //	float values[9];
