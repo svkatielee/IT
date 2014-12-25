@@ -29,12 +29,16 @@ int Debug_pt = 0;
 Quaternion Qset;  // set point for desired attitude
 Quaternion Qerr;  // error values - diff fron  desired - actual
 Quaternion Qcur;  // current orientation
+Quaternion Qtmp;
 
 int State=0; //  {INIT=0 ,STANBY=1, AUTO=2, DODGE=3};
 int lastState=0;
 float ypr_set[3], ypr_cur[3], ypr_err[3];
 float ypr[3];
 float values[11];  //0-2 acc, 3-5 gyro, 6-8 magn, 9-10 baro
+float Eangle, Rx, Ry, Rz;	// error angle and error rotation axis
+float Kpa=10, Kpe=10, Kpr=100;	// alerion elevator and rudder positive proportional gains
+float Da, De, Dr;			// alerion elevator and rudder command
 
 int var2=0;
 AnalogIn pin3(PA_0);
@@ -136,6 +140,7 @@ wait(2);
         switch(State) {
 			case 0: // INIT:
 				imu.pc.printf("in INIT of case\n");
+				State++;
 				break;
 			case 1: // STANDBY:
 				imu.pc.printf("STANBY: ");
@@ -144,19 +149,44 @@ wait(2);
 			case 2: // AUTO:
 				if (lastState!=2) {
 					Qset=Qcur;
+					lastState=2;
 				}
-				//print_q("Qcur", Qcur); 
+				// Qerror = Qdesired * inverse of Qcurrent
+				Qerr = Qset.getProduct( Qcur.getConjugate());
+				Eangle = 2.0f * acosf(Qerr.w);		// the error angle
+				//imu.pc.printf(" Error angle %+6.2f ",Eangle);
+				Rx = Qerr.x / sinf( Eangle / 2.0f);	// error rotation axis
+				Ry = Qerr.y / sinf( Eangle / 2.0f);
+				Rz = Qerr.z / sinf( Eangle / 2.0f);
+				// alerion elevator and rudder command with Kp positive proportional gains
+				// If I had the rates I could subtract Kd's ( positive derivative gains. )
+				// for derivative terms using the measured body rates p, q and r as:
+				Da = Kpa * Eangle * Rx;	//	- Kda * P ;	// alerion command with Kp positive proportional gains
+				De = Kpe * Eangle * Ry;	//	- Kde * Q ;	// elevator command with Kp positive proportional gains
+				Dr = Kpr * Eangle * Rz;	//	- Kdr * R ;	// rudder command with Kp positive proportional gains
+				// So now Dr is the command to the rudder.
+				
+								//print_q("Qcur", Qcur); 
 				//print_q("Qset", Qset);
 				//imu.pc.printf("\n");
-				Qset.getYawPitchRoll(ypr_set);
-				Qcur.getYawPitchRoll(ypr_cur);
+				//Qset.getYawPitchRoll(ypr_set);
+				//Qcur.getYawPitchRoll(ypr_cur);
 				//print_v(ypr_set);
 				//print_v(ypr_cur);
-				hr = rawHeading();
+				
+				
+				
+				//print_q("Qerr", Qerr); 
+				//hr = rawHeading();
 				hc=Qcur.getHeading();
 				hs=Qset.getHeading();
-				he=Qerr.getHeading();
-				imu.pc.printf("RawHead %+6.2f Cur.head %+6.2f Set.head %+6.2f Err.head %+6.2f ", hr, hc, hs, he);
+				//he=Qerr.getHeading();
+				//imu.pc.printf("RawHead %+6.2f Cur.head %+6.2f Set.head %+6.2f Err.head %+6.2f ", hr, hc, hs, he);
+				imu.pc.printf("Set %+6.2f Cur %+6.2f ", hs, hc);
+				
+				//imu.pc.printf("\n");
+				//imu.pc.printf(" Error angle %+6.2f and commands %+6.4f %+6.4f %+6.4f \n", Eangle*180/M_PI, Da, De, Dr);
+				imu.pc.printf(" Commands %+6.4f %+6.4f %+6.4f ", Da, De, Dr);
 				imu.pc.printf("\n");
 				break;
 			case 3: //DODGE:
